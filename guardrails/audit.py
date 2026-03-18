@@ -31,8 +31,8 @@ from typing import Any
 # Setup
 # ---------------------------------------------------------------------------
 
-# Resolve project root as two levels above this file (src/guardrails/audit.py)
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Resolve project root as one level above this file (guardrails/audit.py → project root)
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _LOG_DIR = _PROJECT_ROOT / "logs"
 _LOG_FILE = _LOG_DIR / "guardrails_audit.jsonl"
 

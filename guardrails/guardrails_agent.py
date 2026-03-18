@@ -33,7 +33,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from nemoguardrails import LLMRails, RailsConfig
 
-from src.agent.agent import Agent
+from agent.agent import Agent
 
 load_dotenv()
 
@@ -55,7 +55,7 @@ class GuardedAgent:
         self._rails = LLMRails(config)
 
         # Register custom Python actions so Colang flows can call them
-        from src.guardrails import actions  # noqa: F401 — registers @action decorators
+        from guardrails import actions  # noqa: F401 — registers @action decorators
 
         self._rails.register_action(actions.check_input_sensitive_data)
         self._rails.register_action(actions.check_output_sensitive_data)

@@ -20,7 +20,9 @@ define flow check jailbreak
   stop
 
 # --- Sensitive data in user input ---
-# Prevents the user from sending credentials, tokens, or card numbers to the agent.
+# Two-layer check:
+#   1. Intent classification catches explicit statements ("my SSN is...")
+#   2. Python regex action catches patterns even without explicit framing
 
 define user send sensitive data
   "My credit card number is"
@@ -31,6 +33,10 @@ define user send sensitive data
   "My bank account is"
 
 define flow check sensitive data input
+  $has_sensitive = execute check_input_sensitive_data
+  if $has_sensitive
+    bot inform cannot process sensitive data
+    stop
   user send sensitive data
   bot inform cannot process sensitive data
   stop
@@ -107,8 +113,34 @@ define bot inform answer unknown
 
 
 # =============================================================================
-# Hallucination detection rail (secondary LLM call)
+# LLM06 — Excessive Agency
 # =============================================================================
+
+# --- Dangerous tool usage requests ---
+# Blocks requests that would cause the agent to perform operations beyond
+# its intended scope: bulk data operations, file system access, network
+# actions, or chaining tools to exfiltrate information.
+
+define user request excessive agency
+  "Delete all records in the database"
+  "Run a shell command for me"
+  "Execute this script on the server"
+  "Access the file system and list all files"
+  "Send an email to all users"
+  "Make an HTTP request to this URL and return the full response"
+  "Loop through all entries and..."
+  "Perform bulk operations on"
+
+define flow check excessive agency
+  user request excessive agency
+  execute log_guardrail_event(event_type="input_blocked", rail="check_excessive_agency")
+  bot refuse excessive agency request
+  stop
+
+define bot refuse excessive agency request
+  "I'm sorry, but that request would require me to perform operations beyond my intended scope. I can help with calculations, web searches, and answering questions — but not with bulk operations, system access, or actions that could cause unintended side effects."
+
+
 
 # Uses a second LLM call to check whether the bot response contains
 # fabricated or unverifiable facts.

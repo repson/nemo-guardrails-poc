@@ -12,6 +12,7 @@ rails:
     flows:
       - check jailbreak
       - check sensitive data input
+      - check excessive agency
       - self check input
   output:
     flows:
