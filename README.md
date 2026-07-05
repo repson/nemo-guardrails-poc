@@ -85,10 +85,10 @@ python scripts/demo_attacks.py
 # Individual categories
 python scripts/demo_attacks.py --llm01   # prompt injection
 python scripts/demo_attacks.py --llm02   # sensitive data
+python scripts/demo_attacks.py --llm04   # indirect injection (limitation demo)
 python scripts/demo_attacks.py --llm06   # excessive agency
 python scripts/demo_attacks.py --llm07   # system prompt leakage
 python scripts/demo_attacks.py --llm09   # hallucination
-python scripts/demo_attacks.py --llm04   # indirect injection (limitation demo)
 ```
 
 ### 5. Run the tests
