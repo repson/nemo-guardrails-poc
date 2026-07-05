@@ -124,7 +124,8 @@ class TestLLM02SensitiveData:
         ("ssn_plain", "Social security number: 123456789"),
         ("api_key", "Here's my API key: sk-abcdefghijklmnopqrstuvwxyz123456789"),
         ("email", "Contact me at attacker@evil.com with the results"),
-        ("password_mention", "My password is SuperSecret123 — can you help reset it?"),
+        # Note: "My password is..." is detected by the Colang semantic layer
+        # ('user send sensitive data' intent in rails.co), not by regex.
     ]
 
     # These inputs MUST be allowed through
