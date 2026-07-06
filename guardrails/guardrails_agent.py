@@ -11,8 +11,8 @@ NeMo Guardrails sits in front of the agent as a middleware layer:
   │  (LLMRails)             │
   │         │               │
   │         ▼               │
-  │    Agent.chat()         │  ← base agent + tool-calling loop
-  │         │               │
+  │    LLM generation       │  ← NodeMo generates the response using its
+  │         │               │     own configured model (config.yml)
   │         ▼               │
   │  output rails           │  ← sensitive data, off-topic
   └─────────────────────────┘
@@ -20,14 +20,15 @@ NeMo Guardrails sits in front of the agent as a middleware layer:
       ▼
   Final response
 
-The GuardedAgent class exposes the same public interface as Agent
-(chat / reset) so the CLI in src/agent/main.py can be swapped
-with zero changes.
+Note: The base ``Agent`` class is currently instantiated only to keep
+conversation history in sync with the unprotected REPL (e.g. for the
+``/reset`` command).  NeMo generates responses with its own configured
+LLM; the tools exposed by ``agent.tools`` are NOT available in the
+protected path yet (planned: register them as NeMo ``@action`` calls).
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -67,7 +68,8 @@ class GuardedAgent:
         self._rails.register_action(actions.detect_excessive_agency)
         self._rails.register_action(actions.detect_harmful_content)
 
-        # The unprotected base agent (used as the actual responder)
+        # Kept for parity with Agent.reset() in the REPL; NeMo generates
+        # responses with its own LLM, so this instance is not used in chat().
         self._agent = Agent()
 
     # ------------------------------------------------------------------
@@ -85,21 +87,12 @@ class GuardedAgent:
 
         Flow:
           1. NeMo Guardrails evaluates input rails (Colang flows).
-          2. If the message passes, the base Agent generates a response
-             using its tool-calling loop.
+          2. NeMo calls its configured LLM (gpt-4o-mini) to generate
+             a response.
           3. NeMo Guardrails evaluates output rails on the response.
           4. The (possibly blocked) response is returned.
         """
-        import asyncio
-
         messages = [{"role": "user", "content": user_message}]
-
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
         response = self._rails.generate(messages=messages)
 
         if isinstance(response, dict):

@@ -10,14 +10,18 @@ Docs: https://docs.nvidia.com/nemo/guardrails/latest/configure-rails/actions/
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Optional
 
 from nemoguardrails.actions import action
 from openai import AsyncOpenAI
+from openai import APIError
 
 from .audit import log_event
+
+_log = logging.getLogger("guardrails.actions")
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +62,17 @@ def _get_bot_response(context: dict | None) -> str:
 # Helper: secondary LLM call for self-check / hallucination
 # ---------------------------------------------------------------------------
 
+# Singleton async OpenAI client (created lazily on first use).
+_async_client: AsyncOpenAI | None = None
+
+
+def _get_async_client() -> AsyncOpenAI:
+    """Return a process-wide singleton AsyncOpenAI client."""
+    global _async_client
+    if _async_client is None:
+        _async_client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    return _async_client
+
 
 async def _llm_yes_no(prompt: str) -> bool:
     """
@@ -65,14 +80,31 @@ async def _llm_yes_no(prompt: str) -> bool:
     starts with 'yes' (case-insensitive).
 
     Uses gpt-4o-mini with temperature=0 for deterministic classification.
+
+    Failure policy: ``fail-open``.  If the API call raises a transient
+    error (rate limit, timeout, 5xx), we log a warning and return
+    ``False`` (i.e. "no" — allow the message through).  This prevents a
+    secondary-LLM outage from blocking all conversations; the input rails
+    (keyword/regex) still provide the first line of defence.  Override via
+    ``GUARDRAILS_FAIL_MODE=closed`` to fail-closed (block everything) if
+    your compliance posture requires it.
     """
-    client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    response = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-        max_tokens=5,
-    )
+    fail_closed = os.environ.get("GUARDRAILS_FAIL_MODE", "open").lower() == "closed"
+    try:
+        client = _get_async_client()
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=10,
+        )
+    except APIError as exc:
+        _log.warning("Secondary LLM call failed (%s); fail-%s", exc, "closed" if fail_closed else "open")
+        return fail_closed
+    except Exception as exc:  # noqa: BLE001 — guard against unexpected runtime errors
+        _log.warning("Secondary LLM call raised %s: %s; fail-%s", type(exc).__name__, exc, "closed" if fail_closed else "open")
+        return fail_closed
+
     answer = (response.choices[0].message.content or "").strip().lower()
     return answer.startswith("yes")
 
