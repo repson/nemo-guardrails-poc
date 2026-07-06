@@ -40,6 +40,20 @@ def _contains_sensitive_data(text: str) -> bool:
     return any(pattern.search(text) for pattern in _SENSITIVE_PATTERNS)
 
 
+def _get_user_message(context: dict | None) -> str:
+    """Extract the user message from context, handling NeMo 0.23 key names."""
+    if context is None:
+        return ""
+    return context.get("user_message") or context.get("last_user_message") or ""
+
+
+def _get_bot_response(context: dict | None) -> str:
+    """Extract the bot response from context."""
+    if context is None:
+        return ""
+    return context.get("bot_response") or ""
+
+
 # ---------------------------------------------------------------------------
 # Helper: secondary LLM call for self-check / hallucination
 # ---------------------------------------------------------------------------
@@ -77,7 +91,7 @@ async def check_input_sensitive_data(context: Optional[dict] = None) -> bool:
     """
     if context is None:
         return False
-    message = context.get("last_user_message", "")
+    message = _get_user_message(context)
     result = _contains_sensitive_data(message)
     if result:
         log_event(
@@ -97,13 +111,13 @@ async def check_output_sensitive_data(context: Optional[dict] = None) -> bool:
     """
     if context is None:
         return False
-    message = context.get("bot_response", "")
+    message = _get_bot_response(context)
     result = _contains_sensitive_data(message)
     if result:
         log_event(
             event_type="output_blocked",
             rail="check_sensitive_data_output",
-            user_input=context.get("last_user_message", ""),
+            user_input=_get_user_message(context),
             details={"reason": "sensitive_data_in_response"},
         )
     return result
@@ -121,8 +135,8 @@ async def self_check_input(context: Optional[dict] = None) -> bool:
     if context is None:
         return True
 
-    user_input = context.get("last_user_message", "")
-    prompt = context.get("self_check_input_prompt", "")
+    user_input = _get_user_message(context)
+    prompt = context.get("self_check_input_prompt") or ""
 
     if not prompt:
         # Fallback: build a minimal prompt if NeMo didn't inject one
@@ -155,8 +169,8 @@ async def self_check_output(context: Optional[dict] = None) -> bool:
     if context is None:
         return True
 
-    bot_response = context.get("bot_response", "")
-    prompt = context.get("self_check_output_prompt", "")
+    bot_response = _get_bot_response(context)
+    prompt = context.get("self_check_output_prompt") or ""
 
     if not prompt:
         prompt = (
@@ -170,7 +184,7 @@ async def self_check_output(context: Optional[dict] = None) -> bool:
         log_event(
             event_type="output_blocked",
             rail="self_check_output",
-            user_input=context.get("last_user_message", ""),
+            user_input=_get_user_message(context),
             details={
                 "reason": "self_check_llm_rejected",
                 "bot_response_snippet": bot_response[:200],
@@ -192,9 +206,9 @@ async def check_hallucination(context: Optional[dict] = None) -> bool:
     if context is None:
         return False
 
-    user_input = context.get("last_user_message", "")
-    bot_response = context.get("bot_response", "")
-    prompt = context.get("check_hallucination_prompt", "")
+    user_input = _get_user_message(context)
+    bot_response = _get_bot_response(context)
+    prompt = context.get("check_hallucination_prompt") or ""
 
     if not prompt:
         prompt = (
@@ -227,9 +241,77 @@ async def log_guardrail_event(
     Generic action to log any guardrail event from a Colang flow.
     Can be called manually from flows that don't have a dedicated action.
     """
-    user_message = (context or {}).get("last_user_message", "")
+    user_message = _get_user_message(context or {})
     log_event(
         event_type=event_type,
         rail=rail,
         user_input=user_message,
     )
+
+
+# ---------------------------------------------------------------------------
+# Keyword-based intent detection actions
+# ---------------------------------------------------------------------------
+# These replace Colang intent matching (user xxx / bot xxx) which in
+# NeMo >=0.23.0 blocks generation when intent does not match.
+# Instead we use Python keyword checks via @action and if/else in Colang.
+
+_JAILBREAK_KEYWORDS = [
+    "ignore your previous instructions",
+    "forget everything you were told",
+    "you are now dan",
+    "pretend you have no restrictions",
+    "act as if you were trained differently",
+    "disregard your guidelines",
+    "ignore your safety limits",
+    "override your safety",
+    "new directive",
+]
+
+_EXCESSIVE_AGENCY_KEYWORDS = [
+    "delete all records",
+    "run a shell command",
+    "execute this script",
+    "access the file system",
+    "list all files",
+    "send an email to all",
+    "make an http request",
+    "loop through all entries",
+    "perform bulk operations",
+    "export them",
+    "rm -rf",
+    "mass email",
+    "access the server",
+]
+
+_HARMFUL_CONTENT_KEYWORDS = [
+    "how do i make a bomb",
+    "how can i hack into",
+    "how to synthesize drugs",
+    "how to hurt someone",
+    "tell me how to commit",
+]
+
+
+@action(name="detect_jailbreak")
+async def detect_jailbreak(context: Optional[dict] = None) -> bool:
+    if context is None:
+        return False
+    message = _get_user_message(context).lower()
+    return any(kw in message for kw in _JAILBREAK_KEYWORDS)
+
+
+@action(name="detect_excessive_agency")
+async def detect_excessive_agency(context: Optional[dict] = None) -> bool:
+    if context is None:
+        return False
+    message = _get_user_message(context).lower()
+    return any(kw in message for kw in _EXCESSIVE_AGENCY_KEYWORDS)
+
+
+@action(name="detect_harmful_content")
+async def detect_harmful_content(context: Optional[dict] = None) -> bool:
+    if context is None:
+        return False
+    message = _get_user_message(context).lower()
+    return any(kw in message for kw in _HARMFUL_CONTENT_KEYWORDS)

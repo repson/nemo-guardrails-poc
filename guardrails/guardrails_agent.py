@@ -63,6 +63,9 @@ class GuardedAgent:
         self._rails.register_action(actions.self_check_output)
         self._rails.register_action(actions.check_hallucination)
         self._rails.register_action(actions.log_guardrail_event)
+        self._rails.register_action(actions.detect_jailbreak)
+        self._rails.register_action(actions.detect_excessive_agency)
+        self._rails.register_action(actions.detect_harmful_content)
 
         # The unprotected base agent (used as the actual responder)
         self._agent = Agent()
@@ -89,21 +92,16 @@ class GuardedAgent:
         """
         import asyncio
 
-        # Build the message list in the format expected by LLMRails
         messages = [{"role": "user", "content": user_message}]
 
-        # LLMRails.generate is synchronous but internally may use asyncio;
-        # calling generate_async from a sync context avoids event-loop conflicts.
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
 
-        # Use the synchronous generate method — simpler and sufficient for CLI
         response = self._rails.generate(messages=messages)
 
-        # LLMRails returns either a string or a dict with a "content" key
         if isinstance(response, dict):
             return response.get("content", "")
         return str(response)
